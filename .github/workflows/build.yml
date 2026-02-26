@@ -6,6 +6,9 @@ on:
       - 'v*'          # 推送 tag（如 v1.0.0）时自动构建发布包
   workflow_dispatch:  # 也可在 GitHub 页面手动触发
 
+permissions:
+  contents: write   # 允许创建 Release 和上传附件
+
 jobs:
   build:
     strategy:

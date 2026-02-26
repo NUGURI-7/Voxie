@@ -168,10 +168,21 @@ impl WhisperEngine {
         }
 
         // 配置 Whisper 上下文参数
-        let params = WhisperContextParameters::default();
+        let mut params = WhisperContextParameters::default();
 
-        // 创建 Whisper 上下文（这一步会加载模型权重到内存）
-        // 在 Apple Silicon 上，如果启用了 Metal feature，会自动使用 GPU
+        // Windows：启用 CUDA GPU 加速（需要编译时启用 cuda feature）
+        // macOS：Metal GPU 由 feature flag 自动启用
+        #[cfg(target_os = "windows")]
+        {
+            params.use_gpu(true);
+            log::info!("Windows: 已请求 CUDA GPU 加速（需要 NVIDIA 显卡 + CUDA 驱动）");
+        }
+        #[cfg(target_os = "macos")]
+        {
+            log::info!("macOS: Metal GPU 加速已通过编译 feature 启用");
+        }
+
+        // 创建 Whisper 上下文（这一步会加载模型权重到内存/VRAM）
         let path_str = model_path.to_str().context("模型路径包含无效字符")?;
         log::info!("调用 whisper.cpp 加载模型，路径: {}", path_str);
 
@@ -288,9 +299,11 @@ impl WhisperEngine {
         // 清理文本：去除首尾空格
         let result = result.trim().to_string();
 
+        // 按字符截取预览，避免在 UTF-8 多字节字符中间切割导致 panic（中文 = 3 字节/字符）
+        let preview: String = result.chars().take(50).collect();
         log::info!(
             "识别完成: \"{}\" (耗时 {:.1}秒, 实时率 {:.1}x)",
-            &result[..result.len().min(50)],
+            preview,
             elapsed.as_secs_f64(),
             elapsed.as_secs_f64() / audio_duration_s as f64,
         );

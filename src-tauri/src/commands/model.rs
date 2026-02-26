@@ -240,17 +240,26 @@ pub async fn load_whisper_model(
 
     log::info!("手动加载 Whisper 模型: {}", model.display_name());
 
-    // 模型加载是耗时的 blocking 操作，放入专用线程
+    // 模型加载：使用大栈线程（32MB），避免 Windows 默认 1MB 栈溢出
     let whisper_arc = state.whisper.clone();
-    tokio::task::spawn_blocking(move || -> Result<(), String> {
-        let mut eng = whisper_arc.lock()
-            .map_err(|e| format!("引擎锁失败: {}", e))?;
-        eng.load_model(&model_path)
-            .map_err(|e| format!("加载模型失败: {}", e))
-    })
-    .await
-    .map_err(|e| format!("加载线程崩溃: {}", e))
-    .and_then(|r| r)?;
+    let (load_tx, load_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    std::thread::Builder::new()
+        .name("whisper-model-load".to_string())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            let result = (|| -> Result<(), String> {
+                let mut eng = whisper_arc.lock()
+                    .map_err(|e| format!("引擎锁失败: {}", e))?;
+                eng.load_model(&model_path)
+                    .map_err(|e| format!("加载模型失败: {}", e))
+            })();
+            let _ = load_tx.send(result);
+        })
+        .map_err(|e| format!("创建加载线程失败: {}", e))?;
+
+    load_rx.await
+        .map_err(|e| format!("加载线程通信失败: {}", e))
+        .and_then(|r| r)?;
 
     // 加载完成
     {

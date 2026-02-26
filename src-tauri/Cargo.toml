@@ -76,12 +76,15 @@ num_cpus = "1"
 # 中文简繁体转换（本地，无网络，无 API 依赖）
 zhconv = "0.4"
 
-# whisper-rs 本地语音识别（平台差异：macOS 启用 Metal GPU 加速，其他平台纯 CPU）
+# whisper-rs 本地语音识别（平台差异：macOS 启用 Metal GPU 加速，Windows 启用 CUDA GPU 加速）
 # 注意：首次编译需要较长时间，会自动编译 whisper.cpp
 [target.'cfg(target_os = "macos")'.dependencies]
 whisper-rs = { version = "0.13", features = ["metal"] }
 
-[target.'cfg(not(target_os = "macos"))'.dependencies]
+[target.'cfg(target_os = "windows")'.dependencies]
+whisper-rs = { version = "0.13", features = ["cuda"] }
+
+[target.'cfg(not(any(target_os = "macos", target_os = "windows")))'.dependencies]
 whisper-rs = { version = "0.13" }
 
 [features]

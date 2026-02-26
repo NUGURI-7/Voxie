@@ -150,7 +150,9 @@ async fn transcribe_openai_compatible(params: CloudTranscribeParams) -> Result<S
         .context("解析 API 响应失败")?;
 
     let text = result.text.trim().to_string();
-    log::info!("识别完成，结果: \"{}\"", &text[..text.len().min(60)]);
+    // 用 chars().take() 按字符截取，避免在多字节 UTF-8 字符中间切割导致 panic
+    let preview: String = text.chars().take(60).collect();
+    log::info!("识别完成，结果: \"{}\"", preview);
     Ok(text)
 }
 
@@ -215,7 +217,8 @@ async fn transcribe_aliyun_nls(params: &CloudTranscribeParams) -> Result<String>
 
     if nls.status == 20000000 {
         let text = nls.result.unwrap_or_default();
-        log::info!("阿里云 NLS 识别完成: \"{}\"", &text[..text.len().min(60)]);
+        let preview: String = text.chars().take(60).collect();
+        log::info!("阿里云 NLS 识别完成: \"{}\"", preview);
         Ok(text)
     } else {
         let msg = nls.message.unwrap_or_else(|| "未知错误".to_string());

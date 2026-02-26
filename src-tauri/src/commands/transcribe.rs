@@ -5,13 +5,18 @@ use serde::Serialize;
 use crate::state::{AppState, RecordingStatus, TranscriptionMode, ModelStatus, HistoryItem};
 use crate::cloud::{transcribe_cloud, CloudTranscribeParams};
 
-/// Windows 上 Whisper CPU 推理的超时时间（秒）
-/// CPU 推理可能非常慢，给足时间但不能无限等待
-#[cfg(target_os = "windows")]
-const INFERENCE_TIMEOUT_SECS: u64 = 300; // 5 分钟
+/// Whisper 推理超时时间（秒）
+/// Windows 启用 CUDA 后大模型也应在 10 秒内完成，120 秒是安全边界
+/// 如果用户没有 NVIDIA 显卡 / 没装 CUDA 驱动，会自动回退 CPU，此时仍有超时保护
+const INFERENCE_TIMEOUT_SECS: u64 = 120;
 
-#[cfg(not(target_os = "windows"))]
-const INFERENCE_TIMEOUT_SECS: u64 = 120; // macOS/Linux（Metal 加速）2 分钟
+/// 推理线程栈大小：64MB
+/// whisper.cpp 使用大量局部变量/递归，Windows 默认 1MB 栈会导致闪退（栈溢出）
+/// 64MB 足够所有模型（包括 Large-v3）正常运行
+const INFERENCE_STACK_SIZE: usize = 64 * 1024 * 1024;
+
+/// 模型加载线程栈大小：32MB
+const LOAD_STACK_SIZE: usize = 32 * 1024 * 1024;
 
 // ===== 识别状态查询 =====
 
@@ -142,17 +147,26 @@ pub async fn transcribe_audio(
 
                 log::info!("加载 Whisper 模型: {}", model.display_name());
 
-                // 模型加载是耗时的 blocking 操作，放入专用线程避免阻塞 tokio
+                // 模型加载：使用大栈线程（避免 Windows 1MB 默认栈溢出）
                 let whisper_arc = state.whisper.clone();
-                tokio::task::spawn_blocking(move || -> Result<(), String> {
-                    let mut eng = whisper_arc.lock()
-                        .map_err(|e| format!("引擎锁失败: {}", e))?;
-                    eng.load_model(&model_path)
-                        .map_err(|e| format!("加载模型失败: {}", e))
-                })
-                .await
-                .map_err(|e| format!("加载线程崩溃: {}", e))
-                .and_then(|r| r)?;
+                let (load_tx, load_rx) = tokio::sync::oneshot::channel::<Result<(), String>>();
+                std::thread::Builder::new()
+                    .name("whisper-model-load".to_string())
+                    .stack_size(LOAD_STACK_SIZE)
+                    .spawn(move || {
+                        let result = (|| -> Result<(), String> {
+                            let mut eng = whisper_arc.lock()
+                                .map_err(|e| format!("引擎锁失败: {}", e))?;
+                            eng.load_model(&model_path)
+                                .map_err(|e| format!("加载模型失败: {}", e))
+                        })();
+                        let _ = load_tx.send(result);
+                    })
+                    .map_err(|e| format!("创建加载线程失败: {}", e))?;
+
+                load_rx.await
+                    .map_err(|e| format!("加载线程通信失败: {}", e))
+                    .and_then(|r| r)?;
 
                 // 加载完成，更新状态
                 {
@@ -175,40 +189,43 @@ pub async fn transcribe_audio(
             let audio_clone = audio_data.clone();
             let lang_clone  = settings.language.clone();
 
-            let inference_task = tokio::task::spawn_blocking(move || -> Result<String, String> {
-                let eng = whisper_arc.lock()
-                    .map_err(|e| format!("引擎锁失败: {}", e))?;
-                eng.transcribe(&audio_clone, &lang_clone)
-                    .map_err(|e| format!("本地识别失败: {}", e))
-            });
+            // 使用 64MB 大栈线程 + oneshot channel：
+            // whisper.cpp 推理在 Windows 上需要大量栈空间，
+            // 默认 1MB 栈会导致栈溢出闪退（即使是 Tiny 模型）
+            let (infer_tx, infer_rx) = tokio::sync::oneshot::channel::<Result<String, String>>();
+            std::thread::Builder::new()
+                .name("whisper-inference".to_string())
+                .stack_size(INFERENCE_STACK_SIZE)
+                .spawn(move || {
+                    let result = (|| -> Result<String, String> {
+                        let eng = whisper_arc.lock()
+                            .map_err(|e| format!("引擎锁失败: {}", e))?;
+                        eng.transcribe(&audio_clone, &lang_clone)
+                            .map_err(|e| format!("本地识别失败: {}", e))
+                    })();
+                    let _ = infer_tx.send(result);
+                })
+                .map_err(|e| format!("创建推理线程失败: {}", e))?;
 
-            // 用 tokio::time::timeout 包裹推理任务
+            // 等待推理完成，带超时保护
             let timeout_duration = std::time::Duration::from_secs(INFERENCE_TIMEOUT_SECS);
-            match tokio::time::timeout(timeout_duration, inference_task).await {
-                Ok(join_result) => {
-                    // 推理线程完成
-                    join_result
-                        .map_err(|e| format!("推理线程崩溃: {}", e))
-                        .and_then(|r| r)?
-                }
+            match tokio::time::timeout(timeout_duration, infer_rx).await {
+                Ok(Ok(result)) => result?,
+                Ok(Err(e)) => return Err(format!("推理线程通信失败: {}", e)),
                 Err(_elapsed) => {
-                    // 超时！推理线程仍在后台运行，但我们不再等待
                     log::error!(
                         "Whisper 推理超时（{}秒），放弃等待",
                         INFERENCE_TIMEOUT_SECS
                     );
-
-                    // 重置状态
                     {
                         let mut inner = state.inner.lock()
                             .map_err(|e| format!("状态锁失败: {}", e))?;
                         inner.recording_status = RecordingStatus::Idle;
                         inner.audio_buffer = None;
                     }
-
                     return Err(format!(
                         "本地识别超时（已等待 {} 秒）。\n\
-                         Windows 纯 CPU 推理较慢，建议：\n\
+                         建议：\n\
                          1. 使用更小的模型（如 Tiny 或 Base）\n\
                          2. 缩短录音时长\n\
                          3. 或切换到云端识别模式",

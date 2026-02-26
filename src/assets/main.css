@@ -1,0 +1,213 @@
+/* main.css - 全局样式
+ * Tailwind CSS v4 + daisyUI 5
+ * 绿色清新液态玻璃主题
+ */
+
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: light --default, dark --prefersdark;
+}
+
+/* ===== 主题色令牌 ===== */
+/* 默认主题：Forest Green */
+:root {
+  --clr-accent-rgb:   22, 163, 74;
+  --clr-accent:       #16A34A;
+  --clr-accent-dark:  #15803D;
+  --clr-accent-light: #22C55E;
+  --clr-accent-pale:  #86EFAC;
+  --bg-window-tint:   240, 251, 244;   /* green-50 */
+}
+
+/* Ocean Blue */
+[data-theme="blue"] {
+  --clr-accent-rgb:   37, 99, 235;
+  --clr-accent:       #2563EB;
+  --clr-accent-dark:  #1D4ED8;
+  --clr-accent-light: #3B82F6;
+  --clr-accent-pale:  #93C5FD;
+  --bg-window-tint:   239, 246, 255;   /* blue-50 */
+}
+
+/* Violet */
+[data-theme="violet"] {
+  --clr-accent-rgb:   124, 58, 237;
+  --clr-accent:       #7C3AED;
+  --clr-accent-dark:  #6D28D9;
+  --clr-accent-light: #8B5CF6;
+  --clr-accent-pale:  #C4B5FD;
+  --bg-window-tint:   245, 243, 255;   /* violet-50 */
+}
+
+/* Ember Orange */
+[data-theme="ember"] {
+  --clr-accent-rgb:   234, 88, 12;
+  --clr-accent:       #EA580C;
+  --clr-accent-dark:  #C2410C;
+  --clr-accent-light: #F97316;
+  --clr-accent-pale:  #FED7AA;
+  --bg-window-tint:   255, 247, 237;   /* orange-50 */
+}
+
+/* Sand/Cream — Notion 奶油米白 */
+[data-theme="sand"] {
+  --clr-accent-rgb:   120, 113, 108;
+  --clr-accent:       #78716C;
+  --clr-accent-dark:  #57534E;
+  --clr-accent-light: #A8A29E;
+  --clr-accent-pale:  #E7E5E4;
+  --bg-window-tint:   244, 243, 238;   /* #F4F3EE */
+}
+
+/* Pure White — 纯白简洁 */
+[data-theme="white"] {
+  --clr-accent-rgb:   10, 132, 255;
+  --clr-accent:       #0A84FF;
+  --clr-accent-dark:  #0070E0;
+  --clr-accent-light: #40A0FF;
+  --clr-accent-pale:  #B3DAFF;
+  --bg-window-tint:   255, 255, 255;   /* #FFFFFF */
+}
+
+/* Light Gray — 浅灰经典 */
+[data-theme="gray"] {
+  --clr-accent-rgb:   99, 102, 241;
+  --clr-accent:       #6366F1;
+  --clr-accent-dark:  #4F46E5;
+  --clr-accent-light: #818CF8;
+  --clr-accent-pale:  #C7D2FE;
+  --bg-window-tint:   245, 245, 247;   /* Apple gray */
+}
+
+/* ===== 其它设计令牌（不随主题变化）===== */
+:root {
+  --clr-text:       #0F172A;
+  --clr-text-2:     #475569;
+  --clr-text-muted: #94A3B8;
+  --clr-border:     rgba(0, 0, 0, 0.07);
+  --clr-rec:        #EF4444;
+  --clr-proc:       #3B82F6;
+}
+
+/* ===== 全局基础样式 ===== */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body, #app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  /* 必须显式透明，否则 WebKit 会在圆角外补白色底 */
+  background: transparent;
+  font-family: -apple-system, 'Inter', 'SF Pro Display', system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* ===== 可拖拽区域 ===== */
+[data-tauri-drag-region] { cursor: grab; }
+[data-tauri-drag-region]:active { cursor: grabbing; }
+
+/* ===== 不可拖拽区域 ===== */
+button, input, textarea, select, a, .no-drag {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
+}
+
+/* ===== 细滚动条（跟随主题色）===== */
+::-webkit-scrollbar { width: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(var(--clr-accent-rgb), 0.20);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--clr-accent-rgb), 0.38);
+}
+
+/* ===== 页面切换动画 ===== */
+.page-slide-enter-active {
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+.page-slide-leave-active {
+  transition: opacity 0.1s ease;
+  position: absolute;
+  width: 100%;
+}
+.page-slide-enter-from { opacity: 0; transform: translateX(12px); }
+.page-slide-leave-to   { opacity: 0; }
+
+/* ===== 折叠/展开动画 ===== */
+.slide-up-enter-active {
+  /* 展开：弹簧回弹 + 轻微延迟，配合窗口展开节奏 */
+  transition: opacity 0.28s ease 0.06s, transform 0.34s cubic-bezier(0.34, 1.56, 0.64, 1) 0.06s;
+}
+.slide-up-leave-active {
+  /* 收起：快速出场，缓动减速 */
+  transition: opacity 0.20s ease, transform 0.20s cubic-bezier(0.55, 0, 0.45, 1);
+}
+.slide-up-enter-from { opacity: 0; transform: translateY(16px) scale(0.96); }
+.slide-up-leave-to   { opacity: 0; transform: translateY(-10px) scale(0.97); }
+
+/* ===== 历史条目动画 ===== */
+.item-slide-enter-active {
+  transition: opacity 0.24s ease, transform 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.item-slide-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+  position: absolute;
+  width: 100%;
+}
+.item-slide-enter-from { opacity: 0; transform: translateX(-16px) scale(0.97); }
+.item-slide-leave-to   { opacity: 0; transform: translateX(8px) scale(0.97); }
+
+/* ===== Fade ===== */
+.fade-enter-active, .fade-leave-active { transition: opacity 0.2s ease; }
+.fade-enter-from, .fade-leave-to       { opacity: 0; }
+
+/* ===== Tab 内容淡入切换 ===== */
+.fw-tab-fade-enter-active,
+.fw-tab-fade-leave-active {
+  transition: opacity 0.16s ease;
+}
+.fw-tab-fade-enter-from,
+.fw-tab-fade-leave-to { opacity: 0; }
+
+/* ===== Toast 弹出 ===== */
+.toast-up-enter-active {
+  transition: opacity 0.22s ease, transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.toast-up-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s cubic-bezier(0.55, 0, 0.45, 1);
+}
+.toast-up-enter-from {
+  opacity: 0;
+  transform: translateY(14px) scale(0.85);
+}
+.toast-up-leave-to {
+  opacity: 0;
+  transform: translateY(6px) scale(0.94);
+}
+
+/* ===== 关键帧 ===== */
+@keyframes wave-dance {
+  0%, 100% { transform: scaleY(0.22); opacity: 0.65; }
+  50%       { transform: scaleY(1.85); opacity: 1; }
+}
+@keyframes dot-bounce {
+  0%, 100% { opacity: 0.22; transform: translateY(0) scale(0.80); }
+  50%       { opacity: 1;   transform: translateY(-5px) scale(1.20); }
+}
+@keyframes spin-cw {
+  to { transform: rotate(360deg); }
+}
+@keyframes pulse-ring {
+  0%   { transform: scale(0.82); opacity: 0.75; }
+  65%  { transform: scale(1.85); opacity: 0.12; }
+  100% { transform: scale(2.10); opacity: 0; }
+}

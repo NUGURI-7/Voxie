@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 麦克风权限说明 —— macOS 首次访问时弹窗显示 -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Voxie 需要访问麦克风，以便将您的语音实时转换为文字。</string>
+</dict>
+</plist>

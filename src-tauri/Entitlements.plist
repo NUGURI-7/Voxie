@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 麦克风访问权限 -->
+  <key>com.apple.security.device.audio-input</key>
+  <true/>
+  <!-- 网络客户端访问（云端 API 调用）-->
+  <key>com.apple.security.network.client</key>
+  <true/>
+  <!-- 全局快捷键监听：允许在其他应用前台时捕获键盘事件 -->
+  <!-- 开发阶段使用 temporary-exception；发布时需用户在系统设置→辅助功能中授权 -->
+  <key>com.apple.security.temporary-exception.accessibility</key>
+  <true/>
+</dict>
+</plist>

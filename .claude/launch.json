@@ -1,0 +1,12 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "voxie-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "tauri", "--", "dev"],
+      "port": 5173,
+      "autoPort": false
+    }
+  ]
+}

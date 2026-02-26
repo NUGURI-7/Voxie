@@ -1,0 +1,8 @@
+# .cargo/config.toml - Cargo 构建配置
+
+# Windows：使用 LLVM lld-link 替换 MSVC link.exe
+# lld 是多线程链接器，链接速度比 link.exe 快 2-3 倍
+# 前提：需要安装 LLVM（choco install llvm 或 winget install LLVM.LLVM）
+# CI 上 LLVM 已通过 choco install llvm 安装，本地也需要装 LLVM
+[target.x86_64-pc-windows-msvc]
+linker = "lld-link"

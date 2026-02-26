@@ -257,6 +257,12 @@ export const useAppStore = defineStore('app', () => {
     try {
       await tauriInvoke('stop_recording')
       recordingStatus.value = 'processing'
+
+      // 本地模式下提示用户 CPU 推理可能较慢
+      if (settings.value.mode === 'local') {
+        showToast('正在识别中，请稍候...', 'info')
+      }
+
       const result = await tauriInvoke<{ text: string; durationMs: number; itemId: string }>('transcribe_audio')
       if (settings.value.autoCopy && result.text) {
         await copyToClipboard(result.text)
@@ -265,7 +271,15 @@ export const useAppStore = defineStore('app', () => {
       await loadHistory()
     } catch (e) {
       recordingStatus.value = 'idle'
-      showToast(`识别失败: ${e}`, 'error')
+      const errMsg = String(e)
+      // 对常见错误提供更友好的提示
+      if (errMsg.includes('超时')) {
+        showToast('识别超时，建议使用更小的模型或切换云端模式', 'error')
+      } else if (errMsg.includes('音量过低')) {
+        showToast('录音音量过低，请检查麦克风设置', 'error')
+      } else {
+        showToast(`识别失败: ${errMsg}`, 'error')
+      }
     }
   }
 

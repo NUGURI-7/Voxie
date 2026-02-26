@@ -5,6 +5,14 @@ use serde::Serialize;
 use crate::state::{AppState, RecordingStatus, TranscriptionMode, ModelStatus, HistoryItem};
 use crate::cloud::{transcribe_cloud, CloudTranscribeParams};
 
+/// Windows 上 Whisper CPU 推理的超时时间（秒）
+/// CPU 推理可能非常慢，给足时间但不能无限等待
+#[cfg(target_os = "windows")]
+const INFERENCE_TIMEOUT_SECS: u64 = 300; // 5 分钟
+
+#[cfg(not(target_os = "windows"))]
+const INFERENCE_TIMEOUT_SECS: u64 = 120; // macOS/Linux（Metal 加速）2 分钟
+
 // ===== 识别状态查询 =====
 
 #[derive(Debug, Serialize)]
@@ -157,21 +165,57 @@ pub async fn transcribe_audio(
             }
 
             // 3. 执行推理（同样是 blocking，放入专用线程）
-            log::info!("开始本地 Whisper 推理，语言: {}", settings.language);
+            //    添加超时保护：Windows CPU 推理可能非常慢
+            log::info!(
+                "开始本地 Whisper 推理，语言: {}, 超时: {}秒",
+                settings.language, INFERENCE_TIMEOUT_SECS
+            );
 
             let whisper_arc = state.whisper.clone();
             let audio_clone = audio_data.clone();
             let lang_clone  = settings.language.clone();
 
-            tokio::task::spawn_blocking(move || -> Result<String, String> {
+            let inference_task = tokio::task::spawn_blocking(move || -> Result<String, String> {
                 let eng = whisper_arc.lock()
                     .map_err(|e| format!("引擎锁失败: {}", e))?;
                 eng.transcribe(&audio_clone, &lang_clone)
                     .map_err(|e| format!("本地识别失败: {}", e))
-            })
-            .await
-            .map_err(|e| format!("推理线程崩溃: {}", e))
-            .and_then(|r| r)?
+            });
+
+            // 用 tokio::time::timeout 包裹推理任务
+            let timeout_duration = std::time::Duration::from_secs(INFERENCE_TIMEOUT_SECS);
+            match tokio::time::timeout(timeout_duration, inference_task).await {
+                Ok(join_result) => {
+                    // 推理线程完成
+                    join_result
+                        .map_err(|e| format!("推理线程崩溃: {}", e))
+                        .and_then(|r| r)?
+                }
+                Err(_elapsed) => {
+                    // 超时！推理线程仍在后台运行，但我们不再等待
+                    log::error!(
+                        "Whisper 推理超时（{}秒），放弃等待",
+                        INFERENCE_TIMEOUT_SECS
+                    );
+
+                    // 重置状态
+                    {
+                        let mut inner = state.inner.lock()
+                            .map_err(|e| format!("状态锁失败: {}", e))?;
+                        inner.recording_status = RecordingStatus::Idle;
+                        inner.audio_buffer = None;
+                    }
+
+                    return Err(format!(
+                        "本地识别超时（已等待 {} 秒）。\n\
+                         Windows 纯 CPU 推理较慢，建议：\n\
+                         1. 使用更小的模型（如 Tiny 或 Base）\n\
+                         2. 缩短录音时长\n\
+                         3. 或切换到云端识别模式",
+                        INFERENCE_TIMEOUT_SECS
+                    ));
+                }
+            }
         }
     };
 

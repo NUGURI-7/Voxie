@@ -43,10 +43,21 @@ jobs:
         with:
           workspaces: './src-tauri -> target'
 
-      # Windows：安装 LLVM（whisper.cpp 编译需要）
+      # Windows：安装 LLVM（whisper-rs 的 bindgen 需要 libclang）
       - name: Install LLVM (Windows)
         if: matrix.platform == 'windows-latest'
         run: choco install llvm -y
+
+      # Windows：设置环境变量确保 whisper-rs 正确编译
+      # LIBCLANG_PATH：bindgen 需要找到 libclang.dll
+      # whisper.cpp 使用 MSVC (cl.exe) 编译，确保静态链接
+      - name: Set Windows build env
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $llvmPath = "C:\Program Files\LLVM"
+          echo "LIBCLANG_PATH=$llvmPath\bin" >> $env:GITHUB_ENV
+          echo "WHISPER_NO_OPENMP=1" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
         run: npm ci

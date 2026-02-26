@@ -62,7 +62,7 @@ impl WhisperModel {
 
 /// 获取模型存储目录
 /// macOS/Linux: ~/.local/share/voxie/models/
-/// Windows: %APPDATA%\voxie\models\
+/// Windows: %LOCALAPPDATA%\voxie\models\
 pub fn get_models_dir() -> Result<PathBuf> {
     let base_dir = dirs::data_local_dir()
         .context("无法获取用户数据目录")?;
@@ -89,6 +89,41 @@ pub fn is_model_downloaded(model: &WhisperModel) -> bool {
         Ok(path) => path.exists(),
         Err(_) => false,
     }
+}
+
+/// 计算音频数据的 RMS 音量（用于检测静音）
+pub fn audio_rms(data: &[f32]) -> f32 {
+    if data.is_empty() {
+        return 0.0;
+    }
+    let sum_sq: f64 = data.iter().map(|&s| (s as f64) * (s as f64)).sum();
+    (sum_sq / data.len() as f64).sqrt() as f32
+}
+
+/// 获取推荐的线程数
+/// Windows CPU 模式下使用物理核心数（避免超线程争用导致挂死）
+/// macOS 使用逻辑核心数（Metal GPU 加速为主，CPU 线程影响较小）
+fn recommended_threads() -> i32 {
+    let physical = num_cpus::get_physical() as i32;
+    let logical = num_cpus::get() as i32;
+
+    // Windows CPU-only：使用物理核心数，上限 4
+    // 过多线程在 Windows whisper.cpp 上可能导致线程争用
+    #[cfg(target_os = "windows")]
+    let threads = std::cmp::min(physical, 4);
+
+    // macOS / Linux：使用逻辑核心数，上限 8
+    #[cfg(not(target_os = "windows"))]
+    let threads = std::cmp::min(logical, 8);
+
+    // 至少 1 个线程
+    let threads = std::cmp::max(threads, 1);
+
+    log::info!(
+        "CPU: {} 物理核 / {} 逻辑核 → 使用 {} 线程",
+        physical, logical, threads
+    );
+    threads
 }
 
 /// Whisper 识别引擎
@@ -119,15 +154,29 @@ impl WhisperEngine {
             anyhow::bail!("模型文件不存在: {:?}", model_path);
         }
 
+        // 检查文件大小（模型文件损坏或下载不完整的常见表现）
+        let file_size = std::fs::metadata(model_path)
+            .context("无法读取模型文件信息")?
+            .len();
+        log::info!("模型文件大小: {:.1} MB", file_size as f64 / 1024.0 / 1024.0);
+
+        if file_size < 1024 * 1024 {
+            anyhow::bail!(
+                "模型文件过小 ({} bytes)，可能下载不完整，请删除后重新下载",
+                file_size
+            );
+        }
+
         // 配置 Whisper 上下文参数
         let params = WhisperContextParameters::default();
 
         // 创建 Whisper 上下文（这一步会加载模型权重到内存）
         // 在 Apple Silicon 上，如果启用了 Metal feature，会自动使用 GPU
-        let ctx = WhisperContext::new_with_params(
-            model_path.to_str().context("模型路径包含无效字符")?,
-            params,
-        ).context("加载 Whisper 模型失败，请检查模型文件是否完整")?;
+        let path_str = model_path.to_str().context("模型路径包含无效字符")?;
+        log::info!("调用 whisper.cpp 加载模型，路径: {}", path_str);
+
+        let ctx = WhisperContext::new_with_params(path_str, params)
+            .context("加载 Whisper 模型失败，请检查模型文件是否完整")?;
 
         self.ctx = Some(ctx);
         self.current_model = Some(
@@ -150,24 +199,45 @@ impl WhisperEngine {
         let ctx = self.ctx.as_ref()
             .context("Whisper 模型未加载，请先加载模型")?;
 
-        // 创建识别参数
+        // ── 音频数据验证 ──
+        let audio_duration_s = audio_data.len() as f32 / 16000.0;
+        let rms = audio_rms(audio_data);
+        log::info!(
+            "音频验证: {} 样本, {:.1}秒, RMS音量={:.6}",
+            audio_data.len(), audio_duration_s, rms
+        );
+
+        if audio_data.is_empty() {
+            anyhow::bail!("音频数据为空");
+        }
+
+        // 检测静音：RMS < 0.0005 基本上是无声的
+        if rms < 0.0005 {
+            anyhow::bail!(
+                "录音音量过低 (RMS={:.6})，可能麦克风未正确工作或环境完全静音。\n\
+                 请检查: 1. 麦克风是否被静音 2. 系统音频设置中输入设备是否正确",
+                rms
+            );
+        }
+
+        // ── 创建识别参数 ──
         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 1 });
 
         // 设置识别语言
+        // 注意：auto 模式需要额外的语言检测步骤，在 CPU 上会更慢
         if language == "auto" || language.is_empty() {
-            // 自动检测语言
             params.set_language(None);
+            log::info!("语言: 自动检测（注意: 会增加 CPU 推理时间）");
         } else {
             params.set_language(Some(language));
+            log::info!("语言: {}", language);
         }
 
         // 性能优化参数
-        params.set_n_threads(
-            // 使用所有可用的 CPU 线程数，但不超过 8
-            std::cmp::min(num_cpus::get() as i32, 8)
-        );
+        let n_threads = recommended_threads();
+        params.set_n_threads(n_threads);
 
-        // 禁用进度输出（静默运行）
+        // 禁用不必要的输出
         params.set_print_progress(false);
         params.set_print_special(false);
         params.set_print_realtime(false);
@@ -176,23 +246,37 @@ impl WhisperEngine {
         // 翻译模式：false 表示转录（保持原语言），true 表示翻译成英文
         params.set_translate(false);
 
-        log::info!("开始识别，音频长度: {} 样本 ({:.1}秒)",
-            audio_data.len(),
-            audio_data.len() as f32 / 16000.0
-        );
+        // 短音频优化：5 秒以下使用单段模式，减少开销
+        if audio_duration_s < 5.0 {
+            params.set_single_segment(true);
+            log::info!("短音频模式: 启用 single_segment");
+        }
 
-        // 创建识别状态并执行识别
+        log::info!(
+            "开始 Whisper 推理: 线程={}, 音频={:.1}秒",
+            n_threads, audio_duration_s
+        );
+        let start_time = std::time::Instant::now();
+
+        // ── 创建识别状态并执行识别 ──
         let mut state = ctx.create_state()
             .context("创建 Whisper 状态失败")?;
 
+        log::info!("Whisper state 创建成功，开始 full() 推理...");
+
         // 执行完整推理（这是最耗时的步骤）
+        // Windows CPU 模式下可能非常慢，外层有超时保护
         state.full(params, audio_data)
             .context("Whisper 识别失败")?;
 
-        // 提取识别结果
-        // Whisper 将输出分成多个"段落"（segments）
+        let elapsed = start_time.elapsed();
+        log::info!("Whisper 推理完成，耗时: {:.1}秒", elapsed.as_secs_f64());
+
+        // ── 提取识别结果 ──
         let n_segments = state.full_n_segments()
             .context("获取段落数失败")?;
+
+        log::info!("识别结果: {} 个段落", n_segments);
 
         let mut result = String::new();
         for i in 0..n_segments {
@@ -204,7 +288,12 @@ impl WhisperEngine {
         // 清理文本：去除首尾空格
         let result = result.trim().to_string();
 
-        log::info!("识别完成，结果: \"{}\"", &result[..result.len().min(50)]);
+        log::info!(
+            "识别完成: \"{}\" (耗时 {:.1}秒, 实时率 {:.1}x)",
+            &result[..result.len().min(50)],
+            elapsed.as_secs_f64(),
+            elapsed.as_secs_f64() / audio_duration_s as f64,
+        );
         Ok(result)
     }
 
@@ -222,7 +311,7 @@ impl WhisperEngine {
     pub fn unload(&mut self) {
         self.ctx = None;
         self.current_model = None;
-        log::info!("Whisper 模型已卸载！～");
+        log::info!("Whisper 模型已卸载");
     }
 }
 

@@ -16,11 +16,12 @@ use tauri::Manager;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 初始化日志系统
-    // 在调试模式下显示所有日志，发布模式只显示警告以上
+    // 调试模式：显示所有日志
+    // 发布模式：显示 voxie 模块的 info 日志（用于诊断 Whisper 等运行时问题）
     #[cfg(debug_assertions)]
     std::env::set_var("RUST_LOG", "voxie=debug,tauri=info");
     #[cfg(not(debug_assertions))]
-    std::env::set_var("RUST_LOG", "warn");
+    std::env::set_var("RUST_LOG", "voxie=info,tauri=warn");
 
     env_logger::init();
 

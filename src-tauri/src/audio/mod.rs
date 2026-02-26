@@ -136,10 +136,21 @@ impl AudioRecorder {
         );
 
         let duration_ms = (resampled.len() as f64 / TARGET_RATE as f64 * 1000.0) as u64;
+
+        // 计算音频统计信息（帮助诊断 Windows 上录音问题）
+        let rms = crate::whisper::audio_rms(&resampled);
+        let max_val = resampled.iter().fold(0.0f32, |m, &s| m.max(s.abs()));
         log::info!(
-            "重采样完成: {} 样本，约 {}ms",
-            resampled.len(), duration_ms
+            "重采样完成: {} 样本, {}ms, RMS={:.6}, 峰值={:.4}",
+            resampled.len(), duration_ms, rms, max_val
         );
+
+        if rms < 0.001 {
+            log::warn!(
+                "录音音量极低 (RMS={:.6})! 可能原因: 麦克风静音/未授权/设备错误",
+                rms
+            );
+        }
 
         resampled
     }

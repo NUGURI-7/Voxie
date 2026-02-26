@@ -48,10 +48,63 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: choco install llvm -y
 
+      # Windows：安装 CUDA Toolkit（精简包，只装编译所需组件）
+      - name: Install CUDA Toolkit (Windows)
+        if: matrix.platform == 'windows-latest'
+        uses: Jimver/cuda-toolkit@v0.2.16
+        id: cuda-toolkit
+        with:
+          cuda: '12.4.0'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "visual_studio_integration"]'
+
+      # Windows：手动将 CUDA VS Integration 文件复制到 VS 目录
+      # 这是解决 "No CUDA toolset found" 的关键步骤：
+      # CUDA 安装包含 VS Integration 文件，但 GitHub Actions 的 VS 不会自动识别
+      # 必须手动复制到 VS 的 BuildCustomizations 目录
+      - name: Setup CUDA VS Integration (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $cudaPath = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          $src = "$cudaPath\extras\visual_studio_integration\MSBuildExtensions"
+
+          # GitHub Actions 上 VS2022 BuildTools 的路径
+          $vsPaths = @(
+            "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VC\v170\BuildCustomizations",
+            "C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VC\v170\BuildCustomizations"
+          )
+
+          if (-not (Test-Path $src)) {
+            Write-Host "ERROR: CUDA VS Integration source not found at: $src"
+            exit 1
+          }
+
+          $copied = $false
+          foreach ($dst in $vsPaths) {
+            if (Test-Path $dst) {
+              Copy-Item "$src\*" $dst -Force
+              Write-Host "CUDA VS Integration copied to: $dst"
+              $copied = $true
+              break
+            }
+          }
+
+          if (-not $copied) {
+            Write-Host "Searching for VS BuildCustomizations directory..."
+            $found = Get-ChildItem "C:\Program Files*" -Recurse -Directory -Filter "BuildCustomizations" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+              Copy-Item "$src\*" $found.FullName -Force
+              Write-Host "CUDA VS Integration copied to: $($found.FullName)"
+            } else {
+              Write-Host "ERROR: Could not find VS BuildCustomizations directory"
+              exit 1
+            }
+          }
+
       # Windows：设置编译环境变量
-      # LIBCLANG_PATH：bindgen 需要找到 libclang.dll（已由上面 choco install llvm 安装）
-      # WHISPER_NO_OPENMP：禁用 OpenMP 避免 whisper.cpp 链接问题
-      # 注：Windows 目前使用 CPU 模式，无需 CUDA Toolkit
       - name: Set Windows build env
         if: matrix.platform == 'windows-latest'
         shell: pwsh
@@ -59,6 +112,7 @@ jobs:
           $llvmPath = "C:\Program Files\LLVM"
           echo "LIBCLANG_PATH=$llvmPath\bin" >> $env:GITHUB_ENV
           echo "WHISPER_NO_OPENMP=1" >> $env:GITHUB_ENV
+          echo "CUDA_PATH=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
         run: npm ci

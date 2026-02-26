@@ -49,14 +49,14 @@ jobs:
         run: choco install llvm -y
 
       # Windows：安装 CUDA Toolkit（whisper.cpp CUDA 加速需要）
-      # 使用 Jimver/cuda-toolkit action，安装 CUDA 12.4
+      # 不指定 sub-packages = 完整安装，包含 Visual Studio Integration
+      # VS Integration 是 CMake enable_language(CUDA) 必须的，缺少会报 "No CUDA toolset found"
       - name: Install CUDA Toolkit (Windows)
         if: matrix.platform == 'windows-latest'
         uses: Jimver/cuda-toolkit@v0.2.16
         with:
           cuda: '12.4.0'
           method: 'network'
-          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev"]'
 
       # Windows：设置环境变量确保 whisper-rs 正确编译
       # LIBCLANG_PATH：bindgen 需要找到 libclang.dll

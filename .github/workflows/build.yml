@@ -48,19 +48,10 @@ jobs:
         if: matrix.platform == 'windows-latest'
         run: choco install llvm -y
 
-      # Windows：安装 CUDA Toolkit（whisper.cpp CUDA 加速需要）
-      # 不指定 sub-packages = 完整安装，包含 Visual Studio Integration
-      # VS Integration 是 CMake enable_language(CUDA) 必须的，缺少会报 "No CUDA toolset found"
-      - name: Install CUDA Toolkit (Windows)
-        if: matrix.platform == 'windows-latest'
-        uses: Jimver/cuda-toolkit@v0.2.16
-        with:
-          cuda: '12.4.0'
-          method: 'network'
-
-      # Windows：设置环境变量确保 whisper-rs 正确编译
-      # LIBCLANG_PATH：bindgen 需要找到 libclang.dll
-      # CUDA_PATH：whisper.cpp cmake 找 CUDA
+      # Windows：设置编译环境变量
+      # LIBCLANG_PATH：bindgen 需要找到 libclang.dll（已由上面 choco install llvm 安装）
+      # WHISPER_NO_OPENMP：禁用 OpenMP 避免 whisper.cpp 链接问题
+      # 注：Windows 目前使用 CPU 模式，无需 CUDA Toolkit
       - name: Set Windows build env
         if: matrix.platform == 'windows-latest'
         shell: pwsh
@@ -68,8 +59,6 @@ jobs:
           $llvmPath = "C:\Program Files\LLVM"
           echo "LIBCLANG_PATH=$llvmPath\bin" >> $env:GITHUB_ENV
           echo "WHISPER_NO_OPENMP=1" >> $env:GITHUB_ENV
-          # CUDA_PATH 由 cuda-toolkit action 自动设置，这里确认一下
-          echo "CUDA_PATH=$env:CUDA_PATH" >> $env:GITHUB_ENV
 
       - name: Install frontend dependencies
         run: npm ci

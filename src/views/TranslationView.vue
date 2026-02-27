@@ -69,6 +69,14 @@
 
       <div class="tv-footer-btns">
         <button
+          class="tv-icon-btn no-drag"
+          @click="pasteFromClipboard"
+          title="粘贴剪贴板内容"
+        >
+          <ClipboardPaste :size="13" :stroke-width="2" />
+        </button>
+
+        <button
           v-if="dstText && !isTranslating"
           class="tv-icon-btn no-drag"
           @click="copyResult"
@@ -96,7 +104,7 @@
 import { ref, computed, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useAppStore } from '@/stores/app'
 import type { TranslationLang } from '@/stores/app'
-import { ArrowLeftRight, X, Loader2, Copy, Languages } from 'lucide-vue-next'
+import { ArrowLeftRight, X, Loader2, Copy, Languages, ClipboardPaste } from 'lucide-vue-next'
 
 const appStore = useAppStore()
 
@@ -107,7 +115,7 @@ function resizeTextarea() {
   const el = textareaEl.value
   if (!el) return
   el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+  el.style.height = Math.min(el.scrollHeight, 300) + 'px'
 }
 
 const langs = [
@@ -213,6 +221,24 @@ function clearAll() {
 
 async function copyResult() {
   await appStore.copyToClipboard(dstText.value)
+}
+
+async function pasteFromClipboard() {
+  try {
+    let text = ''
+    if (appStore.isTauri) {
+      const { readText } = await import('@tauri-apps/plugin-clipboard-manager')
+      text = (await readText()) ?? ''
+    } else {
+      text = await navigator.clipboard.readText()
+    }
+    if (text) {
+      srcText.value = text
+      nextTick(resizeTextarea)
+    }
+  } catch (e) {
+    console.warn('读取剪贴板失败:', e)
+  }
 }
 
 async function doTranslate() {
@@ -322,8 +348,8 @@ onMounted(() => {
 .tv-textarea {
   resize: none;
   width: 100%;
-  min-height: 70px;
-  max-height: 200px;
+  min-height: 105px;
+  max-height: 300px;
   overflow-y: auto;
   padding: 8px 10px 22px;
   border-radius: 10px;

@@ -246,6 +246,10 @@ function updateDuration() {
   const m = Math.floor(sec / 60)
   const s = Math.floor(sec % 60)
   recordingDuration.value = `${m}:${s.toString().padStart(2, '0')}`
+  // 超过 60 秒自动停止
+  if (sec >= 60) {
+    stopRecording()
+  }
 }
 
 // ===== 点击录音按钮：开始 / 停止 =====

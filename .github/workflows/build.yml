@@ -20,7 +20,7 @@ jobs:
           - platform: macos-latest
             args: '--target x86_64-apple-darwin'    # Intel Mac
           - platform: windows-latest
-            args: ''
+            args: '--config src-tauri/tauri.windows.conf.json'
 
     runs-on: ${{ matrix.platform }}
 
@@ -113,6 +113,30 @@ jobs:
           echo "LIBCLANG_PATH=$llvmPath\bin" >> $env:GITHUB_ENV
           echo "WHISPER_NO_OPENMP=1" >> $env:GITHUB_ENV
           echo "CUDA_PATH=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> $env:GITHUB_ENV
+
+      # Windows：把 CUDA 运行时 DLL 复制到 src-tauri/cuda-dlls/，由 Tauri 一起打进安装包
+      # 用户机器上不需要安装 CUDA Toolkit，直接运行即可
+      - name: Copy CUDA runtime DLLs (Windows)
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $cudaBin = "${{ steps.cuda-toolkit.outputs.CUDA_PATH }}\bin"
+          $dest = "src-tauri\cuda-dlls"
+          New-Item -ItemType Directory -Force -Path $dest | Out-Null
+          $dlls = @(
+            "cudart64_12.dll",    # CUDA Runtime
+            "cublas64_12.dll",    # cuBLAS（whisper.cpp 矩阵运算）
+            "cublasLt64_12.dll"   # cuBLAS Lt
+          )
+          foreach ($dll in $dlls) {
+            $src = "$cudaBin\$dll"
+            if (Test-Path $src) {
+              Copy-Item $src $dest -Force
+              Write-Host "✓ $dll"
+            } else {
+              Write-Host "✗ $dll (not found, skipping)"
+            }
+          }
 
       - name: Install frontend dependencies
         run: npm ci
